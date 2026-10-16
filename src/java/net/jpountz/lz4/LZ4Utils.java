@@ -16,6 +16,9 @@ package net.jpountz.lz4;
  * limitations under the License.
  */
 
+import java.nio.ByteBuffer;
+import java.util.Arrays;
+
 import static net.jpountz.lz4.LZ4Constants.HASH_LOG;
 import static net.jpountz.lz4.LZ4Constants.HASH_LOG_64K;
 import static net.jpountz.lz4.LZ4Constants.HASH_LOG_HC;
@@ -50,6 +53,30 @@ enum LZ4Utils {
 
   static int hashHC(int i) {
     return (i * -1640531535) >>> ((MIN_MATCH * 8) - HASH_LOG_HC);
+  }
+
+  /**
+   * Zero out a buffer.
+   *
+   * @param array The input array
+   * @param start The start index
+   * @param end   The end index (exclusive)
+   */
+  static void zero(byte[] array, int start, int end) {
+    Arrays.fill(array, start, end, (byte) 0);
+  }
+
+  /**
+   * Zero out a buffer.
+   *
+   * @param bb    The input buffer
+   * @param start The start index
+   * @param end   The end index (exclusive)
+   */
+  static void zero(ByteBuffer bb, int start, int end) {
+    for (int i = start; i < end; i++) {
+      bb.put(i, (byte) 0);
+    }
   }
 
   static class Match {

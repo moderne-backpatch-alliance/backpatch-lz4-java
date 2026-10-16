@@ -110,7 +110,14 @@
 
       final int matchCopyEnd = dOff + matchLen;
 
-      if (matchCopyEnd > destEnd - COPY_LENGTH) {
+      if (matchDec == 0) {
+        if (matchCopyEnd > destEnd) {
+          throw new LZ4Exception("Malformed input at " + sOff);
+        }
+        // With matchDec == 0, matchOff == dOff, so we'd copy in place. Zero the data instead. (CVE-2025-66566)
+        assert matchOff == dOff; // should always hold, but this extra check will trigger during fuzzing if my logic is wrong
+        LZ4Utils.zero(dest, dOff, matchCopyEnd);
+      } else if (matchCopyEnd > destEnd - COPY_LENGTH) {
         if (matchCopyEnd > destEnd) {
           throw new LZ4Exception("Malformed input at " + sOff);
         }
