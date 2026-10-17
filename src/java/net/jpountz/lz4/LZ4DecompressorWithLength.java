@@ -18,6 +18,9 @@ package net.jpountz.lz4;
 
 import java.nio.ByteBuffer;
 
+import net.jpountz.util.ByteBufferUtils;
+import net.jpountz.util.SafeUtils;
+
 /**
  * Convenience class to decompress data compressed by {@link LZ4CompressorWithLength}.
  * This decompressor is NOT compatible with any other compressors in lz4-java
@@ -25,18 +28,31 @@ import java.nio.ByteBuffer;
  * The user does not need to specify the length of the compressed data or
  * original data because the length of the original decompressed data is
  * included in the compressed data.
+ * For large or unknown-size inputs, prefer {@link LZ4FrameInputStream} to avoid
+ * buffering the complete decompressed data in memory.
+ * The default maximum decompressed length for methods that allocate their
+ * output buffer can be overridden at class initialization with the
+ * {@code net.jpountz.lz4.LZ4DecompressorWithLength.maxDecompressedLength}
+ * system property, specified as a number of bytes. Constructors with an
+ * explicit maximum are not affected by this property.
  */
 
 public class LZ4DecompressorWithLength {
 
+  // Each LZ4 match-length extension byte adds at most 255 decompressed bytes.
+  private static final int MAX_COMPRESSION_RATIO = 255;
+  private static final int DEFAULT_MAX_DECOMPRESSED_LENGTH = Integer.getInteger(
+      "net.jpountz.lz4.LZ4DecompressorWithLength.maxDecompressedLength", 64 * 1024 * 1024);
+
   private final LZ4FastDecompressor fastDecompressor;
   private final LZ4SafeDecompressor safeDecompressor;
+  private final int maxDecompressedLength;
 
   /**
    * Returns the decompressed length of compressed data in <code>src</code>.
    *
    * @param src the compressed data
-   * @return the decompressed length
+   * @return the decompressed length, without validating it against the compressed data
    */
   public static int getDecompressedLength(byte[] src) {
     return getDecompressedLength(src, 0);
@@ -47,7 +63,7 @@ public class LZ4DecompressorWithLength {
    *
    * @param src the compressed data
    * @param srcOff the start offset in src
-   * @return the decompressed length
+   * @return the decompressed length, without validating it against the compressed data
    */
   public static int getDecompressedLength(byte[] src, int srcOff) {
     return (src[srcOff] & 0xFF) | (src[srcOff + 1] & 0xFF) << 8 | (src[srcOff + 2] & 0xFF) << 16 | src[srcOff + 3] << 24;
@@ -57,7 +73,7 @@ public class LZ4DecompressorWithLength {
    * Returns the decompressed length of compressed data in <code>src</code>.
    *
    * @param src the compressed data
-   * @return the decompressed length
+   * @return the decompressed length, without validating it against the compressed data
    */
   public static int getDecompressedLength(ByteBuffer src) {
     return getDecompressedLength(src, src.position());
@@ -68,10 +84,24 @@ public class LZ4DecompressorWithLength {
    *
    * @param src the compressed data
    * @param srcOff the start offset in src
-   * @return the decompressed length
+   * @return the decompressed length, without validating it against the compressed data
    */
   public static int getDecompressedLength(ByteBuffer src, int srcOff) {
     return (src.get(srcOff) & 0xFF) | (src.get(srcOff + 1) & 0xFF) << 8 | (src.get(srcOff + 2) & 0xFF) << 16 | src.get(srcOff + 3) << 24;
+  }
+
+  /**
+   * Creates a new decompressor to decompress data compressed by {@link LZ4CompressorWithLength}.
+   * Methods that allocate their output buffer reject decompressed lengths greater than 64 MiB by default.
+   * This fallback can be overridden with the
+   * {@code net.jpountz.lz4.LZ4DecompressorWithLength.maxDecompressedLength} system property.
+   * Note that it is deprecated to use a JNI-binding instance of {@link LZ4FastDecompressor}.
+   * Please see {@link LZ4Factory#nativeInstance()} for details.
+   *
+   * @param fastDecompressor fast decompressor to use
+   */
+  public LZ4DecompressorWithLength(LZ4FastDecompressor fastDecompressor) {
+    this(fastDecompressor, DEFAULT_MAX_DECOMPRESSED_LENGTH);
   }
 
   /**
@@ -80,20 +110,74 @@ public class LZ4DecompressorWithLength {
    * Please see {@link LZ4Factory#nativeInstance()} for details.
    *
    * @param fastDecompressor fast decompressor to use
+   * @param maxDecompressedLength maximum decompressed length for methods that allocate their output buffer
+   * @throws IllegalArgumentException if maxDecompressedLength is negative
+   * @since 1.11.2
    */
-  public LZ4DecompressorWithLength(LZ4FastDecompressor fastDecompressor) {
+  public LZ4DecompressorWithLength(LZ4FastDecompressor fastDecompressor, int maxDecompressedLength) {
+    SafeUtils.checkLength(maxDecompressedLength);
     this.fastDecompressor = fastDecompressor;
     this.safeDecompressor = null;
+    this.maxDecompressedLength = maxDecompressedLength;
+  }
+
+  /**
+   * Creates a new decompressor to decompress data compressed by {@link LZ4CompressorWithLength}.
+   * Methods that allocate their output buffer reject decompressed lengths greater than 64 MiB by default.
+   * This fallback can be overridden with the
+   * {@code net.jpountz.lz4.LZ4DecompressorWithLength.maxDecompressedLength} system property.
+   *
+   * @param safeDecompressor safe decompressor to use
+   */
+  public LZ4DecompressorWithLength(LZ4SafeDecompressor safeDecompressor) {
+    this(safeDecompressor, DEFAULT_MAX_DECOMPRESSED_LENGTH);
   }
 
   /**
    * Creates a new decompressor to decompress data compressed by {@link LZ4CompressorWithLength}.
    *
    * @param safeDecompressor safe decompressor to use
+   * @param maxDecompressedLength maximum decompressed length for methods that allocate their output buffer
+   * @throws IllegalArgumentException if maxDecompressedLength is negative
+   * @since 1.11.2
    */
-  public LZ4DecompressorWithLength(LZ4SafeDecompressor safeDecompressor) {
+  public LZ4DecompressorWithLength(LZ4SafeDecompressor safeDecompressor, int maxDecompressedLength) {
+    SafeUtils.checkLength(maxDecompressedLength);
     this.fastDecompressor = null;
     this.safeDecompressor = safeDecompressor;
+    this.maxDecompressedLength = maxDecompressedLength;
+  }
+
+  private void checkDecompressedLength(int decompressedLength) {
+    if (decompressedLength < 0) {
+      throw new LZ4Exception("Invalid decompressed length: " + decompressedLength);
+    }
+    if (decompressedLength > maxDecompressedLength) {
+      throw new LZ4Exception("Decompressed length " + decompressedLength
+          + " exceeds configured maximum " + maxDecompressedLength);
+    }
+  }
+
+  private void checkDecompressedLength(int decompressedLength, int compressedLength) {
+    if (compressedLength < 0) {
+      throw new LZ4Exception("Invalid compressed length: " + compressedLength);
+    }
+    if (decompressedLength > (long) compressedLength * MAX_COMPRESSION_RATIO) {
+      throw new LZ4Exception("Decompressed length " + decompressedLength
+          + " exceeds maximum compression ratio of " + MAX_COMPRESSION_RATIO
+          + " for compressed length " + compressedLength);
+    }
+    checkDecompressedLength(decompressedLength);
+  }
+
+  private static void checkDestinationLength(int decompressedLength, int maxDestinationLength) {
+    if (decompressedLength < 0) {
+      throw new LZ4Exception("Invalid decompressed length: " + decompressedLength);
+    }
+    if (decompressedLength > maxDestinationLength) {
+      throw new LZ4Exception("Decompressed length " + decompressedLength
+          + " exceeds destination length " + maxDestinationLength);
+    }
   }
 
   /**
@@ -127,6 +211,8 @@ public class LZ4DecompressorWithLength {
       return decompress(src, srcOff, src.length - srcOff, dest, destOff);
     }
     final int destLen = getDecompressedLength(src, srcOff);
+    SafeUtils.checkRange(dest, destOff, 0);
+    checkDestinationLength(destLen, dest.length - destOff);
     return fastDecompressor.decompress(src, srcOff + 4, dest, destOff, destLen) + 4;
   }
 
@@ -150,6 +236,8 @@ public class LZ4DecompressorWithLength {
       return decompress(src, srcOff, dest, destOff);
     }
     final int destLen = getDecompressedLength(src, srcOff);
+    SafeUtils.checkRange(dest, destOff, 0);
+    checkDestinationLength(destLen, dest.length - destOff);
     return safeDecompressor.decompress(src, srcOff + 4, srcLen - 4, dest, destOff, destLen);
   }
 
@@ -159,6 +247,7 @@ public class LZ4DecompressorWithLength {
    *
    * @param src the compressed data
    * @return the decompressed data
+   * @throws LZ4Exception if the declared decompressed length is invalid or exceeds the configured maximum
    */
   public byte[] decompress(byte[] src) {
     return decompress(src, 0);
@@ -176,12 +265,14 @@ public class LZ4DecompressorWithLength {
    * @param src the compressed data
    * @param srcOff the start offset in src
    * @return the decompressed data
+   * @throws LZ4Exception if the declared decompressed length is invalid or exceeds the configured maximum
    */
   public byte[] decompress(byte[] src, int srcOff) {
     if (safeDecompressor != null) {
       return decompress(src, srcOff, src.length - srcOff);
     }
     final int destLen = getDecompressedLength(src, srcOff);
+    checkDecompressedLength(destLen, src.length - srcOff - 4);
     return fastDecompressor.decompress(src, srcOff + 4, destLen);
   }
 
@@ -198,12 +289,15 @@ public class LZ4DecompressorWithLength {
    * @param srcOff the start offset in src
    * @param srcLen the exact size of the compressed data (ignored when {@link LZ4FastDecompressor} is used)
    * @return the decompressed data
+   * @throws LZ4Exception if the declared decompressed length is invalid or exceeds the configured maximum
    */
   public byte[] decompress(byte[] src, int srcOff, int srcLen) {
     if (safeDecompressor == null) {
       return decompress(src, srcOff);
     }
+    SafeUtils.checkRange(src, srcOff, srcLen);
     final int destLen = getDecompressedLength(src, srcOff);
+    checkDecompressedLength(destLen, srcLen - 4);
     return safeDecompressor.decompress(src, srcOff + 4, srcLen - 4, destLen);
   }
 
@@ -218,6 +312,7 @@ public class LZ4DecompressorWithLength {
    */
   public void decompress(ByteBuffer src, ByteBuffer dest) {
     final int destLen = getDecompressedLength(src, src.position());
+    checkDestinationLength(destLen, dest.remaining());
     if (safeDecompressor == null) {
       final int read = fastDecompressor.decompress(src, src.position() + 4, dest, dest.position(), destLen);
       src.position(src.position() + 4 + read);
@@ -248,6 +343,8 @@ public class LZ4DecompressorWithLength {
       return decompress(src, srcOff, src.remaining() - srcOff, dest, destOff);
     }
     final int destLen = getDecompressedLength(src, srcOff);
+    ByteBufferUtils.checkRange(dest, destOff, 0);
+    checkDestinationLength(destLen, dest.capacity() - destOff);
     return fastDecompressor.decompress(src, srcOff + 4, dest, destOff, destLen) + 4;
   }
 
@@ -272,6 +369,8 @@ public class LZ4DecompressorWithLength {
       return decompress(src, srcOff, dest, destOff);
     }
     final int destLen = getDecompressedLength(src, srcOff);
+    ByteBufferUtils.checkRange(dest, destOff, 0);
+    checkDestinationLength(destLen, dest.capacity() - destOff);
     return safeDecompressor.decompress(src, srcOff + 4, srcLen - 4, dest, destOff, destLen);
   }
 }
