@@ -229,7 +229,9 @@ public class LZ4BlockInputStream extends FilterInputStream {
         || compressedLen < 0
         || (originalLen == 0 && compressedLen != 0)
         || (originalLen != 0 && compressedLen == 0)
-        || (compressionMethod == COMPRESSION_METHOD_RAW && originalLen != compressedLen)) {
+        || (compressionMethod == COMPRESSION_METHOD_RAW && originalLen != compressedLen)
+        // even an oversized LZ4 block cannot be larger than the LZ4 compress bound of its original length
+        || (compressionMethod == COMPRESSION_METHOD_LZ4 && compressedLen > LZ4Utils.maxCompressedLength(originalLen))) {
       throw new IOException("Stream is corrupted");
     }
     if (originalLen == 0 && compressedLen == 0) {

@@ -23,6 +23,8 @@ import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.zip.Adler32;
@@ -345,6 +347,24 @@ public class LZ4BlockStreamingTest extends AbstractLZ4Test {
     in2.close();
 
     assertArrayEquals(expected, actual2);
+  }
+
+  @Test
+  public void testRejectsLz4CompressedLengthAboveCompressBound() {
+    final int originalLen = 16;
+    for (int compressedLen : new int[] {LZ4Utils.maxCompressedLength(originalLen) + 1, Integer.MAX_VALUE}) {
+      // header only: the block is rejected before its payload or checksum is read
+      final byte[] header = ByteBuffer.allocate(LZ4BlockOutputStream.HEADER_LENGTH)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .put(LZ4BlockOutputStream.MAGIC)
+        .put((byte) (LZ4BlockOutputStream.COMPRESSION_METHOD_LZ4 | 0x0F))
+        .putInt(compressedLen)
+        .putInt(originalLen)
+        .array();
+      final LZ4BlockInputStream in = new LZ4BlockInputStream(new ByteArrayInputStream(header));
+      final IOException e = assertThrows(IOException.class, in::read);
+      assertEquals("Stream is corrupted", e.getMessage());
+    }
   }
 
   // Many empty blocks followed by a regular stream, as could be produced by a malicious peer
