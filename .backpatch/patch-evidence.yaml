@@ -1,6 +1,6 @@
 schema: osera-patch-evidence/0.1.0
 producer: moderne
-release: 1.8.1.1-backpatch-00005
+release: 1.8.1.1-backpatch-00006
 baseline: v1.8.1+backpatch.baseline
 fixes:
   - cve: CVE-2025-66566
@@ -42,12 +42,20 @@ fixes:
     basis: adapted
     artifacts:
       - at.yawk.lz4:lz4-java
-    note: New in this release; adapted onto 1.8.1; fixed at 1.8.1.1-backpatch-00005 (backpatch-lz4-java@f4f7cad).
+    note: Carried from 1.8.1.1-backpatch-00005.
+  - cve: CVE-2026-106453
+    upstream_fix_url: https://github.com/yawkat/lz4-java/commit/6492ce5aca6bd03ff9e08ee18a2beb94c431371a
+    advisory_url: https://nvd.nist.gov/vuln/detail/CVE-2026-106453
+    patch_commit_url: https://github.com/moderne-backpatch-alliance/backpatch-lz4-java/commit/59af67f
+    basis: backport
+    artifacts:
+      - at.yawk.lz4:lz4-java
+    note: New in this release; ported onto 1.8.1; fixed at 1.8.1.1-backpatch-00006 (backpatch-lz4-java@59af67f).
 tests:
-  commit: f4f7cad83a6fecd0a9ca6aff76b98c53fcfa0c80
+  commit: 59af67f8edb6817591c29bbaf7488e20be3dc8ac
   command: JAVA_HOME=<jdk> mvn -B -t <alliance>/work/wave2/items/scripts/lz4-java-1.8.1-toolchains.xml -Djgitver.skip=true -Dmaven.javadoc.skip=true clean test
   runtime: Azul Zulu (Java 21), Apache Maven 3.9.16, macOS aarch64
-  report: lz4-java-1.8.1.1-backpatch-00005-tests.zip
-  report_sha256: 4fa32da6d1e538361a8aabe1509216a57c970d98e8fb5ba88e52e5128cfadaa7
+  report: lz4-java-1.8.1.1-backpatch-00006-tests.zip
+  report_sha256: c16b25160e247970271f18b522e2bc06610d4d17072960bfe402eabac75bffe8
   result: pass
-  note: the full suite at the tested commit, 1564 tests run, 0 failed, 0 skipped; the regression tests for CVE-2026-106452 are LZ4BlockStreamingTest
+  note: the full suite at the tested commit, 1568 tests run, 0 failed, 0 skipped; the regression tests for CVE-2026-106453 are DecompressorWithLengthBoundsTest
